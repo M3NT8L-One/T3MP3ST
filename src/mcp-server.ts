@@ -136,6 +136,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
       const config = scanConfigs[scan_type] || scanConfigs.quick;
 
       const nmapArgs = [
+        '-Pn',
         ...config.portArgs,
         config.timing,
         '-sV',
