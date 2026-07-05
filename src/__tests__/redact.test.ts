@@ -30,6 +30,14 @@ describe('redactString — URL userinfo (basic-auth) scrub', () => {
     expect(redactString('token=abc123def456ghi')).toBe('token=[redacted]');
     expect(redactString('Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')).toContain('Bearer [redacted]');
   });
+
+  it('does not redact pure hex hashes as AWS secret keys', () => {
+    const sha1 = '0123456789abcdef0123456789abcdef01234567';
+    const sha256 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    expect(redactString(`commit ${sha1}`)).toContain(sha1);
+    expect(redactString(`fingerprint ${sha256}`)).toContain(sha256);
+  });
 });
 
 describe('redactSecrets — approval-audit record shape', () => {

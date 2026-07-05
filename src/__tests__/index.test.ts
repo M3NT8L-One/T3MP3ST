@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Arsenal, BUILTIN_TOOLS, successResult, failResult, createToolContext } from '../arsenal/index.js';
 import { FRONTIER_ARSENAL_MILESTONE, SAFE_COMMANDS, TOOL_ADAPTERS, adaptersForFamily, summarizeToolCatalog } from '../arsenal/catalog.js';
 import { createKnowledgeBase, createEvasionEngine, CVE_DATABASE, MITRE_TECHNIQUES } from '../stubs/index.js';
-import { AGENT_PROMPT_PACKS, FOREFRONT_PRESSURE_LANES, OPERATOR_RUNBOOKS, forefrontPressureForFamily, promptPacksForFamily, runbookForFamily } from '../resources/index.js';
+import { AGENT_PROMPT_PACKS, FOREFRONT_PRESSURE_LANES, OPERATOR_RUNBOOKS, WORKFLOW_PRESETS, forefrontPressureForFamily, promptPacksForFamily, runbookForFamily, workflowPresetsForFamily } from '../resources/index.js';
 import { OpGeneral } from '../general/index.js';
 import { LLMBackbone } from '../llm/index.js';
 
@@ -260,6 +260,17 @@ describe('Operator Contracts', () => {
   it('should return forefront lanes by mission family', () => {
     expect(forefrontPressureForFamily('ai_red_team').map(lane => lane.id)).toContain('frontier-browser-tool-privilege');
     expect(forefrontPressureForFamily('agent_warfare').map(lane => lane.id)).toContain('frontier-agent-command-injection');
+  });
+
+  it('should include a local rehearsal preset for repeatable M3NT8L test runs', () => {
+    const preset = WORKFLOW_PRESETS.find(item => item.id === 'm3nt8l-local-rehearsal');
+
+    expect(preset).toBeDefined();
+    expect(preset?.family).toBe('web_api');
+    expect(preset?.route).toBe('wizard');
+    expect(preset?.startingScope).toContain('127.0.0.1');
+    expect(preset?.directive).toMatch(/manual approval receipts/i);
+    expect(workflowPresetsForFamily('web_api').map(item => item.id)).toContain('m3nt8l-local-rehearsal');
   });
 });
 

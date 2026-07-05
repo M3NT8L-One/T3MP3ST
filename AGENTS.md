@@ -14,14 +14,13 @@ Profile MCP server **`t3mp3st-recon`** exposes `security_recon` (dig/nmap). Rebu
 
 ## War Room
 
-```bash
-npm run server   # http://127.0.0.1:3333/ui/
-```
+LaunchAgent **`ai.rocky.t3mp3st-warroom.local`** keeps **`npm run server`** up at **http://127.0.0.1:3333/ui/** (plist: `scripts/launchd/`, logs: `~/.hermes/logs/t3mp3st-warroom-local.*`). Ad-hoc: `npm run server` in repo root.
 
 Project `.env`: `T3MP3ST_HERMES_PROFILE=t3mp3st` (War Room spawns `hermes -p t3mp3st`). Connect Hermes in Settings.
 
 ## Verification
 
 - `npm run doctor`
+- `npm run ops:preflight` before launching a rehearsal run
 - `npm run verify-claims` (benchmark headlines)
 - `hermes --profile t3mp3st config check`

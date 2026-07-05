@@ -86,6 +86,18 @@ export interface ForefrontPressureLane {
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
+    id: 'm3nt8l-local-rehearsal',
+    label: 'M3NT8L local rehearsal',
+    plainLanguage: 'Stage the next local War Room rehearsal against loopback with shallow depth, manual approvals, and receipt-first evidence.',
+    family: 'web_api',
+    route: 'wizard',
+    directive: 'M3NT8L authorized local rehearsal. Use loopback scope only, keep depth shallow, require manual approval receipts for active steps, verify War Room/Hermes readiness first, preserve logs and evidence, and produce an operational after-action report for test-run polish.',
+    startingScope: ['127.0.0.1'],
+    defaultQuestions: ['Is War Room preflight READY?', 'Is Hermes connected with profile t3mp3st?', 'Are there zero pending receipts before ENGAGE?'],
+    expectedOutputs: ['preflight receipt', 'mission timeline', 'approval ledger', 'test-run findings', 'operator polish backlog'],
+    recommendedResources: ['owasp-wstg', 'cwe-top25-2025', 'mitre-attack-enterprise'],
+  },
+  {
     id: 'starter-owned-web-app',
     label: 'I own a web app',
     plainLanguage: 'Check an owned site or staging app for common high-impact web and API risks, then return a fix plan.',

@@ -38,16 +38,45 @@ need(){
   if "$@"; then echo "    ok"; else echo "    FAIL ($bin) — see output above / docs/INSTALL_MATRIX.md"; fi
 }
 
+go_bin(){ echo "${GOBIN:-$HOME/.local/bin}"; }
+install_pd(){
+  local pkg="$1"; shift
+  mkdir -p "$(go_bin)"
+  env GOBIN="$(go_bin)" "$@" go install -v "$pkg"
+}
+install_naabu(){
+  brew list libpcap >/dev/null 2>&1 || brew install libpcap
+  install_pd github.com/projectdiscovery/naabu/v2/cmd/naabu@latest \
+    CGO_ENABLED=1 \
+    CGO_CFLAGS="-I/opt/homebrew/opt/libpcap/include" \
+    CGO_LDFLAGS="-L/opt/homebrew/opt/libpcap/lib"
+}
+install_mythril(){
+  local py="$HOME/.hermes/hermes-agent/venv/bin/python"
+  if [ -x "$py" ]; then pipx install --python "$py" mythril || return 1
+  else pipx install mythril || return 1
+  fi
+  pipx runpip mythril install 'setuptools<81' --force-reinstall
+}
+install_foundry(){
+  curl -L https://foundry.paradigm.xyz | bash || return 1
+  "$HOME/.foundry/bin/foundryup" || return 1
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$HOME/.foundry/bin/forge" "$HOME/.local/bin/forge"
+  ln -sf "$HOME/.foundry/bin/cast" "$HOME/.local/bin/cast"
+}
+
 # Prereq managers (warn, don't fail — a tool that needs a missing manager just FAILs its line).
 if ! have brew && [ -z "$LIST" ]; then echo "⚠ Homebrew not found — brew-based tools will FAIL. https://brew.sh"; fi
 PIPX=pipx; have pipx || PIPX="python3 -m pipx"   # fall back if pipx isn't a shim
 
 recon(){    echo "── 🔍 recon/osint ──"
+  need go          brew install go
   need nmap        brew install nmap
-  need httpx       brew install projectdiscovery/tap/httpx
-  need naabu       brew install projectdiscovery/tap/naabu
-  need katana      brew install projectdiscovery/tap/katana
-  need subfinder   brew install projectdiscovery/tap/subfinder
+  need httpx       install_pd github.com/projectdiscovery/httpx/cmd/httpx@latest
+  need naabu       install_naabu
+  need katana      install_pd github.com/projectdiscovery/katana/cmd/katana@latest CGO_ENABLED=1
+  need subfinder   install_pd github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
   need nuclei      brew install nuclei
 }
 web(){      echo "── 🕸️ web exploitation ──"
@@ -91,9 +120,11 @@ ai(){       echo "── 🤖 ai red-team (the +) ──"
 }
 contract(){ echo "── 📜 smart-contract ──"
   need slither     $PIPX install slither-analyzer
-  need myth        $PIPX install mythril
+  need myth        install_mythril
+  need echidna     brew install echidna
+  need forge       install_foundry
+  need cast        install_foundry
   need solhint     npm install -g solhint
-  echo "  ℹ foundry (forge/cast): curl -L https://foundry.paradigm.xyz | bash && foundryup"
 }
 minimum(){  echo "── ⭐ minimum useful workstation (INSTALL_MATRIX) ──"
   need nmap brew install nmap;       need ffuf brew install ffuf

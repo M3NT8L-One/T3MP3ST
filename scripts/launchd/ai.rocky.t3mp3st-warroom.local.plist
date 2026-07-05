@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.rocky.t3mp3st-warroom.local</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>PATH=/Users/m3nt8l/.local/bin:/Applications/Codex.app/Contents/Resources:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/m3nt8l/.local/bin/npm</string>
+    <string>run</string>
+    <string>server</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/m3nt8l/Projects/T3MP3ST</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/m3nt8l/.hermes/logs/t3mp3st-warroom-local.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/m3nt8l/.hermes/logs/t3mp3st-warroom-local.error.log</string>
+</dict>
+</plist>

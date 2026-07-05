@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { userInfo } from 'os';
-import { agentHome } from '../agent/local-agents.js';
+import { agentHome, getSpec, hermesProfileArgs } from '../agent/local-agents.js';
 
 describe('agentHome — real CLI-auth home, independent of a redirected $HOME', () => {
   const saved = { override: process.env.T3MP3ST_AGENT_HOME, home: process.env.HOME };
@@ -38,5 +38,33 @@ describe('agentHome — real CLI-auth home, independent of a redirected $HOME', 
   it('ignores a blank/whitespace override and falls through to the real home', () => {
     process.env.T3MP3ST_AGENT_HOME = '   ';
     expect(agentHome()).toBe(userInfo().homedir);
+  });
+});
+
+describe('Hermes local-agent args', () => {
+  const saved = {
+    profile: process.env.T3MP3ST_HERMES_PROFILE,
+    yolo: process.env.T3MP3ST_HERMES_YOLO,
+  };
+  const restore = (k: 'T3MP3ST_HERMES_PROFILE' | 'T3MP3ST_HERMES_YOLO', v: string | undefined): void => {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  };
+  afterEach(() => {
+    restore('T3MP3ST_HERMES_PROFILE', saved.profile);
+    restore('T3MP3ST_HERMES_YOLO', saved.yolo);
+  });
+
+  it('threads the configured profile into Hermes spawns', () => {
+    process.env.T3MP3ST_HERMES_PROFILE = 't3mp3st';
+    expect(hermesProfileArgs()).toEqual(['-p', 't3mp3st']);
+  });
+
+  it('ignores T3MP3ST_HERMES_YOLO so War Room cannot bypass manual approvals', () => {
+    process.env.T3MP3ST_HERMES_PROFILE = 't3mp3st';
+    process.env.T3MP3ST_HERMES_YOLO = '1';
+    const hermes = getSpec('hermes') as unknown as { oneShot: (prompt: string) => string[] };
+    expect(hermes.oneShot('hello')).toEqual(['-p', 't3mp3st', '-z', 'hello']);
+    expect(hermes.oneShot('hello')).not.toContain('--yolo');
   });
 });

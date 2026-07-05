@@ -18,9 +18,12 @@ brew doctor
 ```
 
 ```bash
-brew install pipx
-brew install nmap ffuf gobuster feroxbuster nikto dalfox sqlmap exiftool yara binwalk radamsa
-brew install projectdiscovery/tap/subfinder projectdiscovery/tap/httpx projectdiscovery/tap/naabu projectdiscovery/tap/katana projectdiscovery/tap/nuclei
+brew install pipx go libpcap
+brew install nmap ffuf gobuster feroxbuster nikto dalfox sqlmap exiftool yara binwalk radamsa nuclei
+GOBIN="$HOME/.local/bin" go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+GOBIN="$HOME/.local/bin" go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+GOBIN="$HOME/.local/bin" CGO_ENABLED=1 go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+GOBIN="$HOME/.local/bin" CGO_ENABLED=1 go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 ```
 
 ## Phase 2: Repository, Package, And Cloud
@@ -48,8 +51,9 @@ These fill the previously hollow smart-contract and crypto lanes.
 
 ```bash
 npm install -g solhint
-pipx install slither-analyzer mythril
-brew install crytic/tap/echidna hashcat john
+pipx install slither-analyzer
+pipx install --python python3.11 mythril && pipx runpip mythril install "setuptools<81" --force-reinstall
+brew install echidna hashcat john
 ```
 
 Foundry should be installed from the official Foundry installer, then verified with `forge --version` and `cast --version`.

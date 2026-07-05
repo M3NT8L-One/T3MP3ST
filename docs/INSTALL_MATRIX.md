@@ -5,12 +5,12 @@ Use this as the team-facing view of what a workstation needs. The UI and API rem
 | Lane | Tools | macOS | Linux Notes | Execution |
 | --- | --- | --- | --- | --- |
 | Core evidence | `file`, `curl`, `dig`, `host`, `whois`, `openssl` | Usually present or `brew install bind openssl@3` | Usually package-manager available | Mixed local and receipt-gated |
-| Web/API recon | `nmap`, `subfinder`, `httpx`, `naabu`, `katana`, `nuclei` | Homebrew plus ProjectDiscovery tap | Prefer distro packages or upstream release binaries | Receipt-gated |
+| Web/API recon | `nmap`, `subfinder`, `httpx`, `naabu`, `katana`, `nuclei` | Homebrew plus ProjectDiscovery Go installs | Prefer distro packages, Go installs, or upstream release binaries | Receipt-gated |
 | Web/API pressure | `ffuf`, `gobuster`, `feroxbuster`, `nikto`, `dalfox`, `sqlmap` | Homebrew | Distro packages, Go installs, or upstream releases | Receipt-gated |
 | Supply chain | `semgrep`, `gitleaks`, `trufflehog`, `trivy`, `syft`, `grype`, `osv-scanner` | Homebrew or pipx where noted | Distro packages, pipx, or upstream releases | Mostly local-read |
 | Cloud/IaC | `checkov`, `prowler` | Homebrew or pipx | pipx usually cleanest | Local-read or receipt-gated cloud account checks |
 | AI/agent | `garak`, `promptfoo` | pipx and npm | pipx and npm | Receipt-gated model/system probing |
-| Smart contract | `slither`, `myth`, `echidna`, `forge`, `cast`, `solhint` | pipx, Homebrew tap, Foundry installer, npm | pipx, upstream releases, Foundry installer, npm | Local-read plus receipt-gated chain calls |
+| Smart contract | `slither`, `myth`, `echidna`, `forge`, `cast`, `solhint` | pipx, Homebrew, Foundry installer, npm | pipx, upstream releases, Foundry installer, npm | Local-read plus receipt-gated chain calls |
 | Crypto audit | `john`, `hashcat` | Homebrew | Distro packages | Receipt-gated, never store recovered secrets |
 | Reverse/mobile/fuzz | `radamsa`, `afl-fuzz`, `r2`, `apktool`, `jadx`, `exiftool`, `binwalk`, `yara` | Homebrew | Distro packages or upstream releases | Local-read lab artifacts |
 | Gated/import | `msfconsole`, `hydra`, `bloodhound` | Optional | Optional | Catalog-only or import-only until narrow adapters exist |

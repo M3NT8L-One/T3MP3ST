@@ -5,7 +5,7 @@
 # challenges (host has no linux/amd64 tooling), and it is the portable home of the FULL arsenal.
 #
 # "+" over stock Kali = the AI-native / frontier tooling Kali doesn't ship (the ProjectDiscovery
-# Go suite, smart-contract analyzers, semgrep). It also satisfies scripts/check-tools-image.sh:
+# release suite, smart-contract analyzers, semgrep). It also satisfies scripts/check-tools-image.sh:
 # radare2/gdb/objdump/upx + python {z3,sympy,pwn,fpylll,Crypto} + pip-audit.
 #
 # Build:   npm run tools:build           (== bash tools/build.sh)
@@ -20,7 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ── apt: reverse/crypto/pwn + web/recon + osint, plus build deps for the pip layer ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget git unzip ruby-full build-essential pkg-config \
-      python3 python3-pip python3-venv golang-go \
+    python3 python3-dev python3-pip python3-venv \
       # reverse / forensics / pwn  (check-tools-image.sh: radare2 gdb objdump upx)
       radare2 gdb binutils upx-ucl file binwalk foremost exiftool yara steghide xxd \
       # crypto
@@ -49,14 +49,10 @@ RUN pip3 install --no-cache-dir pipx \
  && (pipx install slither-analyzer || echo "WARN: slither pipx install failed") \
  && (pipx install mythril          || echo "WARN: mythril pipx install failed")
 
-# ── go: the "+" — ProjectDiscovery suite + dalfox (not in stock Kali apt) ──
-RUN go install github.com/projectdiscovery/httpx/cmd/httpx@latest        && \
-    go install github.com/projectdiscovery/katana/cmd/katana@latest      && \
-    go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest     && \
-    go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
-    go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest   && \
-    go install github.com/hahwul/dalfox/v2@latest                        && \
-    rm -rf /root/go/pkg /root/.cache/go-build
+# ── release binaries: ProjectDiscovery suite + dalfox (not in stock Kali apt) ──
+# Keep the image linux/amd64 while avoiding the amd64 Go compiler under QEMU on arm64 Macs.
+COPY install-release-tools.py /usr/local/bin/install-release-tools.py
+RUN python3 /usr/local/bin/install-release-tools.py
 
 # ── npm + foundry: smart-contract "+" (solhint, forge/cast) ──
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && \
@@ -78,6 +74,15 @@ RUN curl -fsSL https://github.com/conda-forge/miniforge/releases/latest/download
  && ln -sf /opt/conda/bin/sage /usr/local/bin/sage \
  && /opt/conda/bin/conda clean -afy \
  || echo "WARN: sage (conda-forge) install failed/skipped — crypto falls back to z3/sympy/fpylll"
+
+# Final runtime fixups after the heavyweight optional layers have had a chance to alter PATH/env.
+RUN set -eux; \
+    for tool in forge cast anvil chisel foundryup; do \
+      if [ -x "/root/.foundry/bin/${tool}" ]; then ln -sf "/root/.foundry/bin/${tool}" "/usr/local/bin/${tool}"; fi; \
+    done; \
+    if [ -x /opt/pipx/venvs/mythril/bin/python ]; then \
+      /opt/pipx/venvs/mythril/bin/python -m pip install --no-cache-dir 'setuptools<81'; \
+    fi
 
 WORKDIR /work
 CMD ["bash"]

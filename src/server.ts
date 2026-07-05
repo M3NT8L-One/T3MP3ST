@@ -12,10 +12,12 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { execFile, spawn } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
 import { appendFile, mkdir, readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { promisify } from 'util';
 import { createHash, randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
 import { config, AVAILABLE_MODELS } from './config/index.js';
 import { resolveModels } from './config/provider-models.js';
 import { initProxyFromConfig, configureProxy, getProxyStatus, checkIp, invalidateIpCache } from './net/proxy.js';
@@ -35,6 +37,32 @@ import { listOperatorPrompts, setOperatorOverride, resetOperatorOverride, type O
 import { ingestRepoToSourceContext, runWhiteboxAnalysis, resolveRepoSourceForAnalysis, RepoCloneError, RepoPathError } from './recon/whitebox.js';
 import { initGrammars } from './recon/ts-grammars.js';
 import { redactCredential } from './evidence/index.js';
+
+const PROJECT_RUNTIME_ENV_KEYS = new Set(['T3MP3ST_HERMES_PROFILE']);
+
+function projectRootForRuntimeEnv(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const leaf = moduleDir.split(/[\\/]/).pop();
+  return leaf === 'src' || leaf === 'dist' ? dirname(moduleDir) : process.cwd();
+}
+
+function loadProjectRuntimeEnv(): void {
+  const envPath = join(projectRootForRuntimeEnv(), '.env');
+  if (!existsSync(envPath)) return;
+
+  for (const rawLine of readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!PROJECT_RUNTIME_ENV_KEYS.has(key) || process.env[key] !== undefined) continue;
+    const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+    if (value) process.env[key] = value;
+  }
+}
+
+loadProjectRuntimeEnv();
 
 const execFileAsync = promisify(execFile);
 

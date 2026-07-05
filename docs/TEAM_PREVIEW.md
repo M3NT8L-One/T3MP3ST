@@ -94,3 +94,13 @@ npm run arsenal:smoke
 ```
 
 If the API is not running, `doctor` still checks local files and commands. If the API is running, it also checks health, preflight, arsenal status, and activation metadata.
+
+## Local Rehearsal Preflight
+
+Before a live local rehearsal, run:
+
+```bash
+npm run ops:preflight
+```
+
+The preflight checks the LaunchAgent, listener on `127.0.0.1:3333`, War Room health, Hermes connection, active mission state, and pending `/api/approvals`. A clean run should start with no parked mission and no stale pending approvals. Use `npm run ops:status` for the same report without strict launch blockers. The War Room's Action Receipts strip mirrors the same pending queue with approve/reject controls.

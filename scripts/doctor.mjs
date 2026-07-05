@@ -54,6 +54,68 @@ function scriptExists(pkg, scriptName) {
   return Boolean(pkg.scripts && pkg.scripts[scriptName]);
 }
 
+async function commandOutput(binary, args, timeout = 4000) {
+  try {
+    const { stdout, stderr } = await execFileAsync(binary, args, { timeout, maxBuffer: 1024 * 1024 });
+    return { ok: true, stdout: stdout.trim(), stderr: stderr.trim() };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: String(error.stdout || '').trim(),
+      stderr: String(error.stderr || error.message || '').trim(),
+    };
+  }
+}
+
+function truthy(value) {
+  return /^(1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
+async function readDotEnv(path) {
+  const values = {};
+  if (!(await fileExists(path))) return values;
+  const text = await readFile(path, 'utf8');
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    values[key] = value;
+  }
+  return values;
+}
+
+const firstLine = (text) => String(text || '').split(/\r?\n/).find(Boolean) || '';
+
+function isLoopbackTarget(target) {
+  const raw = String(target || '').trim();
+  if (!raw) return false;
+  const host = raw.replace(/^\[|\]$/g, '');
+  if (['localhost', '127.0.0.1', '::1'].includes(host)) return true;
+  if (/^127\./.test(host)) return true;
+  try {
+    const url = new URL(raw);
+    const urlHost = url.hostname.replace(/^\[|\]$/g, '');
+    return urlHost === 'localhost' || urlHost === '::1' || /^127\./.test(urlHost);
+  } catch {
+    return false;
+  }
+}
+
+function missionSummary(status) {
+  if (!status?.active) return 'idle';
+  const mission = status.mission || {};
+  const phase = mission.currentPhase || 'unknown-phase';
+  const progress = typeof mission.progress === 'number' ? `${Math.round(mission.progress)}%` : 'n/a';
+  const operators = status.operators?.summary || {};
+  return `active ${phase} ${progress}, ${Number(operators.busy || 0)}/${Number(operators.total || 0)} busy`;
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
   const major = Number(process.versions.node.split('.')[0]);
@@ -62,7 +124,7 @@ async function main() {
   const packageJsonExists = await fileExists('package.json');
   check('package.json exists', packageJsonExists);
   const pkg = packageJsonExists ? JSON.parse(await readFile('package.json', 'utf8')) : {};
-  for (const script of ['doctor', 'server', 'typecheck', 'test', 'arsenal:smoke', 'field:drill', 'exploit:smoke', 'prompt:audit']) {
+  for (const script of ['doctor', 'ops:status', 'ops:preflight', 'server', 'typecheck', 'test', 'arsenal:smoke', 'field:drill', 'exploit:smoke', 'prompt:audit']) {
     check(`npm script: ${script}`, scriptExists(pkg, script), pkg.scripts?.[script] || 'missing');
   }
 
@@ -77,6 +139,7 @@ async function main() {
     'docs/SCOPE_AND_AUTHORIZATION.md',
     'examples/demo-missions.json',
     'src/server.ts',
+    'dist/mcp-server.js',
     'src/arsenal/catalog.ts',
   ];
   for (const file of requiredFiles) {
@@ -87,6 +150,7 @@ async function main() {
     ['git', 'required for provenance'],
     ['node', 'required runtime'],
     ['npm', 'required package manager'],
+    ['hermes', 'required for Hermes local-agent integration'],
     ['file', 'core evidence tool'],
     ['curl', 'core HTTP tool'],
     ['dig', 'DNS evidence tool'],
@@ -98,8 +162,55 @@ async function main() {
   ];
   for (const [binary, detail] of commandChecks) {
     const path = await commandPath(binary);
-    const required = ['git', 'node', 'npm', 'file', 'curl'].includes(binary);
+    const required = ['git', 'node', 'npm', 'hermes', 'file', 'curl'].includes(binary);
     check(`command: ${binary}`, Boolean(path), path || `missing - ${detail}`, required ? 'block' : 'warn');
+  }
+
+  const projectEnv = await readDotEnv('.env');
+  const hermesProfile = process.env.T3MP3ST_HERMES_PROFILE || projectEnv.T3MP3ST_HERMES_PROFILE || '';
+  check(
+    'Hermes profile env is t3mp3st',
+    hermesProfile === 't3mp3st',
+    hermesProfile ? `T3MP3ST_HERMES_PROFILE=${hermesProfile}` : 'missing T3MP3ST_HERMES_PROFILE in .env',
+  );
+  const yoloSetting = process.env.T3MP3ST_HERMES_YOLO || projectEnv.T3MP3ST_HERMES_YOLO || '';
+  check(
+    'Hermes yolo env disabled',
+    !truthy(yoloSetting),
+    yoloSetting ? 'T3MP3ST_HERMES_YOLO is set; unset it for manual approvals' : 'not set',
+  );
+
+  if (hermesProfile) {
+    const envPath = await commandOutput('hermes', ['--profile', hermesProfile, 'config', 'env-path']);
+    check(
+      'Hermes profile env file exists',
+      envPath.ok && await fileExists(envPath.stdout),
+      envPath.ok ? envPath.stdout : envPath.stderr,
+    );
+
+    const configPath = await commandOutput('hermes', ['--profile', hermesProfile, 'config', 'path']);
+    const configExists = configPath.ok && await fileExists(configPath.stdout);
+    check('Hermes profile config exists', configExists, configPath.ok ? configPath.stdout : configPath.stderr);
+
+    if (configExists) {
+      const cfgText = await readFile(configPath.stdout, 'utf8');
+      const expectedMcp = `${process.cwd()}/dist/mcp-server.js`;
+      check(
+        'Hermes MCP t3mp3st-recon configured',
+        cfgText.includes('t3mp3st-recon:') && cfgText.includes(expectedMcp) && cfgText.includes('security_recon'),
+        expectedMcp,
+      );
+    }
+
+    const configCheck = await commandOutput('hermes', ['--profile', hermesProfile, 'config', 'check'], 8000);
+    const configCheckText = `${configCheck.stdout}\n${configCheck.stderr}`;
+    check('Hermes profile config check', configCheck.ok, firstLine(configCheckText) || 'config check failed');
+    check(
+      'Hermes profile config current',
+      configCheck.ok && !/update available/i.test(configCheckText),
+      firstLine(configCheckText) || 'current',
+      'warn',
+    );
   }
 
   let apiReachable = false;
@@ -124,6 +235,28 @@ async function main() {
     check('Arsenal does not fake empty coverage', arsenal.ok && arsenal.data.summary?.unmodeled === false, `unmodeled=${arsenal.data.summary?.unmodeled}`);
     const activation = await apiGet('/api/arsenal/activation');
     check('Arsenal activation plan', activation.ok && activation.data.schema_version === 't3mp3st_arsenal_activation/v1', `${activation.data.summary?.total || 0} wired / doc ${activation.data.localPlanDoc || 'missing'}`);
+    const localAgents = await apiGet('/api/agents/local/detect');
+    const hermesAgent = Array.isArray(localAgents.data.agents)
+      ? localAgents.data.agents.find(agent => agent.id === 'hermes')
+      : null;
+    check('War Room detects Hermes local agent', localAgents.ok && hermesAgent?.ready === true, hermesAgent ? `ready=${hermesAgent.ready}` : 'missing');
+    const connectedAgents = Array.isArray(localAgents.data.connected) ? localAgents.data.connected : [];
+    check('War Room has Hermes connected', connectedAgents.includes('hermes'), connectedAgents.join(',') || 'not connected', 'warn');
+
+    const missionStatus = await apiGet('/api/mission/status');
+    check('Mission status endpoint', missionStatus.ok, `${missionStatus.status} ${missionSummary(missionStatus.data)}`);
+    const activeMission = Boolean(missionStatus.data?.active);
+    check('No active mission parked', !activeMission, missionSummary(missionStatus.data), 'warn');
+    const targets = Array.isArray(missionStatus.data?.targets) ? missionStatus.data.targets : [];
+    const externalTargets = targets.filter(target => !isLoopbackTarget(target?.address || target?.url || target));
+    check('Active mission targets are loopback-scoped', !activeMission || externalTargets.length === 0, externalTargets.map(target => target.address || target.url || target).join(', ') || 'loopback/none', 'warn');
+
+    const pendingApprovals = await apiGet('/api/approvals?status=pending');
+    const approvals = Array.isArray(pendingApprovals.data.approvals) ? pendingApprovals.data.approvals : [];
+    check('Pending approval queue visible', pendingApprovals.ok, `${pendingApprovals.status} ${approvals.length} pending`);
+    check('No pending approvals', approvals.length === 0, approvals.map(item => item.id).join(', ') || 'none', 'warn');
+    const externalPending = approvals.filter(approval => !isLoopbackTarget(approval.target));
+    check('Pending approvals are loopback-scoped', externalPending.length === 0, externalPending.map(approval => `${approval.id}:${approval.target}`).join(', ') || 'loopback/none', 'warn');
   }
 
   const blocks = checks.filter(item => !item.passed && item.severity === 'block');

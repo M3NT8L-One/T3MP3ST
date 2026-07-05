@@ -6,24 +6,28 @@ const configSource = readFileSync(join(process.cwd(), 'src/config/index.ts'), 'u
 const serverSource = readFileSync(join(process.cwd(), 'src/server.ts'), 'utf8');
 const setupScript = readFileSync(join(process.cwd(), 'scripts/setup-api.sh'), 'utf8');
 
-function sourceBlock(startMarker: string, endMarker: string): string {
-  const start = configSource.indexOf(startMarker);
+function sourceBlock(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
   expect(start, `missing start marker ${startMarker}`).toBeGreaterThanOrEqual(0);
-  const end = configSource.indexOf(endMarker, start);
+  const end = source.indexOf(endMarker, start);
   expect(end, `missing end marker ${endMarker}`).toBeGreaterThan(start);
-  return configSource.slice(start, end);
+  return source.slice(start, end);
+}
+
+function configBlock(startMarker: string, endMarker: string): string {
+  return sourceBlock(configSource, startMarker, endMarker);
 }
 
 function configLoadEnvBlock(): string {
-  return sourceBlock('private loadEnvVariables(): void', '\n  /**\n   * Get all settings');
+  return configBlock('private loadEnvVariables(): void', '\n  /**\n   * Get all settings');
 }
 
 function exportConfigBlock(): string {
-  return sourceBlock('exportConfig(filePath: string): void', '\n  /**\n   * Create a .env template file');
+  return configBlock('exportConfig(filePath: string): void', '\n  /**\n   * Create a .env template file');
 }
 
 function envTemplateBlock(): string {
-  return sourceBlock('createEnvTemplate(filePath:', '\n    writeFileSync(filePath, template);');
+  return configBlock('createEnvTemplate(filePath:', '\n    writeFileSync(filePath, template);');
 }
 
 describe('API key environment handling hardening', () => {
@@ -34,9 +38,11 @@ describe('API key environment handling hardening', () => {
     expect(block).toContain("join(homedir(), '.t3mp3st', '.env')");
   });
 
-  it('the API server does not re-enable caller-cwd dotenv loading', () => {
+  it('the API server does not re-enable caller-cwd dotenv loading before ConfigManager runs', () => {
     expect(serverSource).not.toMatch(/from ['"]dotenv['"]/);
     expect(serverSource).not.toMatch(/\bdotenv\.config\s*\(/);
+    expect(serverSource).toContain('PROJECT_RUNTIME_ENV_KEYS');
+    expect(serverSource).toContain("'T3MP3ST_HERMES_PROFILE'");
   });
 
   it('setup-api.sh writes the same T3MP3ST-owned env file that ConfigManager reads', () => {

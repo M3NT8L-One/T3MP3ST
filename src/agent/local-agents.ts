@@ -154,30 +154,19 @@ const SPECS: AgentSpec[] = [
     vendor: 'Hermes Agent',
     bin: 'hermes',
     blurb: 'Hermes Agent — tool-calling AI',
-    invokeHint: 'hermes [-p <profile>] -z "<prompt>"  (profile: T3MP3ST_HERMES_PROFILE; --yolo only if T3MP3ST_HERMES_YOLO=1)',
+    invokeHint: 'hermes [-p <profile>] -z "<prompt>"  (profile: T3MP3ST_HERMES_PROFILE; manual approvals only)',
     versionArgs: ['--version'],
     parseVersion: (o) => (o.match(/v([\d]+\.[\d]+(\.[\d]+)?)/)?.[1]) || (o.match(/[\d]+\.[\d]+(\.[\d]+)?/) || ['?'])[0],
     // Hermes desktop on Windows stores its login under %LOCALAPPDATA%\hermes\ (NOT ~/.hermes/), so
     // checking only ~/.hermes/ made an authed Windows install read as NOT AUTHED. Presence-only check;
     // ~/.hermes/auth.json is upstream's POSIX/mac auth artifact, kept alongside the Windows paths.
     authArtifacts: ['~/.hermes/.env', "~/.hermes/auth.json", localAppData('hermes/.env'), localAppData('hermes/auth.json')],
-    oneShot: (p, m) => [...hermesProfileArgs(), '-z', p, ...(hermesYoloEnabled() ? ['--yolo'] : []), ...(m ? ['-m', m] : [])],
+    oneShot: (p, m) => [...hermesProfileArgs(), '-z', p, ...(m ? ['-m', m] : [])],
   },
 ];
 
 export function getSpec(id: string): AgentSpec | undefined {
   return SPECS.find((s) => s.id === id);
-}
-
-/**
- * B-06 — Hermes '--yolo' auto-approves EVERY tool call with no confirmation:
- * powerful but dangerous (unattended command exec with no gate). It is OFF by
- * default; the operator must explicitly opt in with T3MP3ST_HERMES_YOLO=1. Safe
- * mode (the default) runs Hermes without the flag so it honors its own approval
- * prompts. Applies to both the one-shot backbone call and the chat path.
- */
-export function hermesYoloEnabled(): boolean {
-  return /^(1|true|yes|on)$/i.test((process.env.T3MP3ST_HERMES_YOLO || '').trim());
 }
 
 /** Hermes profile flag for War Room/CLI spawns (e.g. `t3mp3st`). Empty = Hermes default/sticky profile. */
@@ -479,9 +468,9 @@ export function localAgentChat(id: string, prompt: string, opts: { model?: strin
   } else if (id === 'codex') {
     workDir = mkdtempSync(join(tmpdir(), 't3mp3st-codexllm-'));
     outFile = join(workDir, 'reply.txt');
-    args = ['exec', '--ephemeral', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'read-only', '--output-last-message', outFile, ...(model ? ['-m', model] : [])];
-  } else { // hermes — takes the prompt as an arg
-    args = [...hermesProfileArgs(), '-z', prompt, ...(hermesYoloEnabled() ? ['--yolo'] : []), ...(model ? ['-m', model] : [])];
+    args = ['exec', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'read-only', '--output-last-message', outFile, ...(model ? ['-m', model] : [])];
+  } else { // hermes — takes the prompt as an arg and keeps Hermes' manual approval gate intact.
+    args = [...hermesProfileArgs(), '-z', prompt, ...(model ? ['-m', model] : [])];
     viaStdin = false;
   }
 
