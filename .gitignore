@@ -3,6 +3,7 @@ dist/
 .env
 *.tsbuildinfo
 .tmp-*.mjs
+.scan-run.mjs
 
 # --- excluded from the published repo ---
 # raw upstream Cybench corpus (181M third-party content incl. writeups/flags/solutions — do not redistribute)

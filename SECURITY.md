@@ -13,7 +13,7 @@ If you discover a security vulnerability in T3MP3ST, please report it responsibl
 1. **Do NOT** open a public GitHub issue for security vulnerabilities.
 2. **Primary channel — GitHub private security advisory.** Open the repository's
    **Security** tab and click **"Report a vulnerability"**, or go directly to
-   [`/security/advisories/new`](../../security/advisories/new). This creates a
+   [`/security/advisories/new`](https://github.com/elder-plinius/T3MP3ST/security/advisories/new). This creates a
    private advisory visible only to you and the maintainers — no email inbox is
    required, and it works from day one on a public repo.
 3. **Fallback channel.** If the Security tab is unavailable to you, open a public

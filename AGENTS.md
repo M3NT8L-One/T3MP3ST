@@ -18,6 +18,10 @@ LaunchAgent **`ai.rocky.t3mp3st-warroom.local`** keeps **`npm run server`** up a
 
 Project `.env`: `T3MP3ST_HERMES_PROFILE=t3mp3st` (War Room spawns `hermes -p t3mp3st`). Connect Hermes in Settings.
 
+## Git (M3NT8L)
+
+Public fork **`M3NT8L-One/T3MP3ST`** (real GitHub fork of official); official upstream **`elder-plinius/T3MP3ST`**. Rocky patches on `m3nt8l/rocky`. Rebase workflow: `docs/GIT-M3NT8L.md`.
+
 ## Verification
 
 - `npm run doctor`
