@@ -430,6 +430,55 @@ describe('Wedged-dispatch timeout backstop', () => {
     expect(stopped).toBe(true);
   });
 
+  it('operator stop clears an active mission instead of leaving a zombie record', async () => {
+    const mod = await import('../index.js');
+    const command = new mod.TempestCommand({
+      name: 'Stop Op',
+      llm: { provider: 'mock', model: 'mock-model' },
+    });
+
+    let stopped = false;
+    command.on('command:stopped', () => { stopped = true; });
+
+    command.start();
+    const mission = command.mission.getActiveMission();
+    expect(mission?.status).toBe('active');
+
+    command.stop('test stop');
+
+    const status = command.getStatus();
+    expect(status.running).toBe(false);
+    expect(status.paused).toBe(false);
+    expect(status.stoppedAt).toEqual(expect.any(Number));
+    expect(command.mission.getActiveMission()).toBeUndefined();
+    expect(mission?.status).toBe('aborted');
+    expect(stopped).toBe(true);
+  });
+
+  it('pause and resume keep MissionControl status aligned with the command loop', async () => {
+    const mod = await import('../index.js');
+    const command = new mod.TempestCommand({
+      name: 'Pause Op',
+      llm: { provider: 'mock', model: 'mock-model' },
+    });
+
+    command.start();
+    const mission = command.mission.getActiveMission();
+    expect(mission?.status).toBe('active');
+
+    command.pause();
+    expect(command.getStatus().running).toBe(true);
+    expect(command.getStatus().paused).toBe(true);
+    expect(mission?.status).toBe('paused');
+
+    command.resume();
+    expect(command.getStatus().running).toBe(true);
+    expect(command.getStatus().paused).toBe(false);
+    expect(mission?.status).toBe('active');
+
+    command.stop('test cleanup');
+  });
+
   it('a wedged mission stalls instead of advancing after required recon dispatches time out', async () => {
     // Tiny backstop so the test is fast and deterministic.
     const prev = process.env.T3MP3ST_TASK_TIMEOUT_MS;

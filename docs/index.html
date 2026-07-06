@@ -2657,6 +2657,23 @@
         .ops-pill.warn { color: #ffaa00; border-color: rgba(255,170,0,0.28); }
         .ops-pill.block { color: #ff4444; border-color: rgba(255,68,68,0.28); }
 
+        .cmd-mini-badge {
+            min-height: 31px;
+            padding: 6px 10px;
+            border-radius: 5px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(0,0,0,0.22);
+            color: #8fa0aa;
+            cursor: pointer;
+            font: 10px/1.15 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .cmd-mini-badge.ok { color: #00ff88; border-color: rgba(0,255,136,0.36); background: rgba(0,255,136,0.08); }
+        .cmd-mini-badge.warn { color: #ffaa00; border-color: rgba(255,170,0,0.42); background: rgba(255,170,0,0.08); }
+        .cmd-mini-badge.block { color: #ff5b6b; border-color: rgba(255,68,68,0.46); background: rgba(255,68,68,0.1); }
+
         .ops-learning-item {
             grid-template-columns: auto minmax(58px, 0.55fr) minmax(0, 1.1fr) auto;
         }
@@ -3621,6 +3638,8 @@
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <div id="cmdThreatLevel" style="padding: 4px 10px; background: rgba(var(--brand-rgb),0.15); border: 1px solid rgba(var(--brand-rgb),0.4); border-radius: 4px; font-size: 10px; color: var(--brand); text-transform: uppercase; letter-spacing: 1px;">LOW</div>
+                            <button type="button" id="cmdLifecycleBadge" class="cmd-mini-badge ok" onclick="refreshSystemStatus()" title="Refresh mission lifecycle status">LIFE idle</button>
+                            <button type="button" id="cmdReceiptBadge" class="cmd-mini-badge ok" onclick="scrollToActionReceipts()" title="Open Action Receipts">RECEIPTS clear</button>
                             <button class="cmd-btn" id="cmdStartBtn" onclick="startMissionFromDashboard()" style="padding: 8px 20px; background: linear-gradient(135deg, var(--brand), #00aa66); border: none; border-radius: 4px; color: #000; font-weight: bold; cursor: pointer; font-size: 12px;" title="Launch mission (Enter / Ctrl+Enter)">▶ ENGAGE</button>
                             <button class="cmd-btn" id="cmdPauseBtn" onclick="pauseMission()" style="padding: 8px 12px; background: rgba(255,170,0,0.2); border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 12px; display: none;" title="Pause mission">⏸</button>
                             <button class="cmd-btn" id="cmdAbortBtn" onclick="abortMission()" style="padding: 8px 12px; background: rgba(255,68,68,0.15); border: 1px solid rgba(255,68,68,0.4); border-radius: 4px; color: #ff4444; cursor: pointer; font-size: 12px;" title="Abort mission (Esc)">✕</button>
@@ -6376,6 +6395,7 @@ tempest.operators.<span class="function">spawn</span>(<span class="string">'scan
                     this._eventSource.addEventListener('status', (e) => {
                         try {
                             const data = JSON.parse(e.data);
+                            applyBackendMissionStatus(data, 'sse');
                             // Update operator status indicators in the war room
                             if (data.operators) {
                                 this._updateOperatorStatusUI(data.operators);
@@ -6632,6 +6652,14 @@ tempest.operators.<span class="function">spawn</span>(<span class="string">'scan
                     const poll = async () => {
                         const status = await this.getStatus();
                         if (onUpdate) onUpdate(status);
+                        applyBackendMissionStatus(status, 'poll');
+
+                        const life = lifecycleState(status);
+                        if (life === 'zombie' || life === 'stalled' || life === 'orphaned_loop') {
+                            status._stalled = true;
+                            resolve(status);
+                            return;
+                        }
 
                         if (!status.active) {
                             resolve(status);
@@ -19404,6 +19432,55 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
         // ═══════════ SYSTEM STATUS — live aggregate: backend · AI backbone · agents · kill-chain · findings ═══════════
         const T3MP_KILLCHAIN = ['reconnaissance','weaponization','delivery','exploitation','installation','command','actions'];
         const T3MP_PHASE_ABBR = { reconnaissance:'RECON', weaponization:'WEAP', delivery:'DLVR', exploitation:'XPLT', installation:'INST', command:'C2', actions:'ACT' };
+        function lifecycleState(status) {
+            return status?.lifecycle?.state || (status?.active ? 'running' : (status?.mission?.status || 'idle'));
+        }
+        function lifecycleSeverity(status) {
+            const state = lifecycleState(status);
+            if (status?.lifecycle?.severity) return status.lifecycle.severity;
+            if (state === 'zombie' || state === 'stalled' || state === 'orphaned_loop') return 'block';
+            if (state === 'paused') return 'warn';
+            return 'ok';
+        }
+        function applyBackendMissionStatus(status, source) {
+            const state = lifecycleState(status);
+            const severity = lifecycleSeverity(status);
+            const phase = status?.mission?.currentPhase || status?.lifecycle?.phase || null;
+            const progress = typeof status?.mission?.progress === 'number' ? Math.round(status.mission.progress) : null;
+            const label = state === 'running' ? 'running'
+                : state === 'zombie' ? 'stale'
+                : state === 'stalled' ? 'stalled'
+                : state === 'paused' ? 'paused'
+                : state || 'idle';
+            setCommandBadge('cmdLifecycleBadge', severity === 'block' ? 'block' : severity === 'warn' ? 'warn' : 'ok', `LIFE ${label}`, status?.lifecycle?.recommendation || 'Mission lifecycle status');
+
+            const cmdStatus = document.getElementById('cmdMissionStatus');
+            if (cmdStatus && (state === 'zombie' || state === 'stalled')) {
+                cmdStatus.textContent = `${label.toUpperCase()} — stop, then re-engage`;
+                cmdStatus.style.color = '#ff5b6b';
+            } else if (cmdStatus && state === 'paused') {
+                cmdStatus.textContent = 'PAUSED — resume or stop';
+                cmdStatus.style.color = '#ffaa00';
+            }
+
+            if (state === 'zombie' || state === 'stalled') {
+                try {
+                    updateSitRep(phase || null, `Dispatch ${label}: ${status?.lifecycle?.recommendation || 'stop and re-engage'}`, 'STALL');
+                } catch (_) {}
+                if (source !== 'poll-silent') {
+                    try { addIntel('LIFECYCLE', `${label.toUpperCase()}: ${status?.lifecycle?.recommendation || 'stop and re-engage'}`, 'danger'); } catch (_) {}
+                }
+            } else if (state === 'running') {
+                try {
+                    const headline = progress == null
+                        ? `Mission running${phase ? ' · ' + phase : ''}`
+                        : `Mission running · ${phase || 'phase'} ${progress}%`;
+                    updateSitRep(phase || null, headline, 'ACTIVE');
+                } catch (_) {}
+            } else if (state === 'idle') {
+                try { updateSitRep(null, 'Awaiting orders — point at a target and engage.', 'STANDBY'); } catch (_) {}
+            }
+        }
         async function refreshSystemStatus() {
             const $ = id => document.getElementById(id);
             const base = (typeof T3MP3ST_API !== 'undefined' && T3MP3ST_API.baseUrl) || '';
@@ -19474,18 +19551,17 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
             }
             // ── Drive the SitRep pipeline from /api/mission/status (sysPhases/sysFindings status cells were consolidated out) ──
             {
-                let phase = null, running = false;
-                // `m.active` is the authoritative run flag; m.mission.status can stay 'active' after a
-                // stop (stale), which would wrongly keep the SitRep ACTIVE — so trust m.active only.
-                try { const m = await (await fetch(base + '/api/mission/status')).json(); phase = m.mission && m.mission.currentPhase; running = !!m.active;
+                let phase = null, running = false, m = null;
+                try { m = await (await fetch(base + '/api/mission/status')).json(); phase = m.mission && m.mission.currentPhase; running = !!m.active;
                   // Resume the Elapsed timer if this tab loaded INTO an already-running mission (missionStartTime is null).
                   if (running && !missionStartTime) { missionStartTime = (m.mission && m.mission.startedAt) || Date.now(); if (!missionTimer) missionTimer = setInterval(updateMissionTimer, 1000); updateMissionTimer(); }
+                  applyBackendMissionStatus(m, 'poll-silent');
                 } catch (_) {}
                 // drive the SitRep pipeline from the poll (SSE phase/sitrep events refine it live).
                 // Set a phase-based fallback headline so a page loaded INTO a running mission still
                 // reflects the current stage — but never clobber a richer Admiral narration.
                 try {
-                    if (typeof updateSitRep === 'function') {
+                    if (typeof updateSitRep === 'function' && !['zombie', 'stalled'].includes(lifecycleState(m))) {
                         const _h = document.getElementById('sitrepHeadline');
                         const _isDefault = !_h || /^(Awaiting orders|⚓ [A-Z]+ in progress)/.test(_h.textContent);
                         const _hl = running
@@ -19547,7 +19623,7 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
         function updateSitRep(phase, headline, status) {
             if (phase !== false) renderSitRepPipeline(phase);
             if (headline) { const h = document.getElementById('sitrepHeadline'); if (h) h.textContent = headline; }
-            if (status !== undefined) { const s = document.getElementById('sitrepStatus'); if (s) { s.textContent = status; s.style.color = status === 'ACTIVE' ? '#00ff88' : '#666'; } }
+            if (status !== undefined) { const s = document.getElementById('sitrepStatus'); if (s) { s.textContent = status; s.style.color = status === 'ACTIVE' ? '#00ff88' : status === 'STALL' ? '#ff5b6b' : status === 'PAUSED' ? '#ffaa00' : '#666'; } }
         }
         window.updateSitRep = updateSitRep;
         try { renderSitRepPipeline(null); } catch (_) {}
@@ -19798,6 +19874,15 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
                         }
                     }, 3000);
 
+                    if (finalStatus?._stalled) {
+                        const recommendation = finalStatus.lifecycle?.recommendation || 'Mission dispatch stalled. Stop and re-engage.';
+                        addIntel('LIFECYCLE', recommendation, 'danger');
+                        addMissionLog('error', recommendation);
+                        completeMission(recommendation);
+                        toast('Mission needs operator reset', 'error');
+                        return;
+                    }
+
                     // Mission complete
                     if (finalStatus.paused && finalStatus.stallReason) {
                         throw new Error(finalStatus.stallReason);
@@ -19932,12 +20017,17 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
         }
 
         // Pause mission
-        function pauseMission() {
+        async function pauseMission() {
             if (!missionRunning) return;
 
             // Pause backend mission if dispatched
             if (BackendDispatch.isAvailable()) {
-                BackendDispatch.pauseMission();
+                const result = await BackendDispatch.pauseMission();
+                if (result?.error) {
+                    addIntel('LIFECYCLE', `Pause refused: ${result.error}`, 'warning');
+                    toast(`Pause refused: ${result.error}`, 'warning');
+                    return;
+                }
             }
 
             document.getElementById('cmdMissionStatus').textContent = 'PAUSED';
@@ -19949,10 +20039,16 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
         }
 
         // Resume mission
-        function resumeMission() {
+        async function resumeMission() {
             // Resume backend mission if dispatched
             if (BackendDispatch.isAvailable()) {
-                BackendDispatch.resumeMission();
+                const result = await BackendDispatch.resumeMission();
+                if (result?.error) {
+                    addIntel('LIFECYCLE', `Resume refused: ${result.error}${result.next ? ' — ' + result.next : ''}`, 'warning');
+                    toast(result.next || result.error, 'warning');
+                    try { refreshSystemStatus(); } catch (_) {}
+                    return;
+                }
             }
 
             document.getElementById('cmdMissionStatus').textContent = 'Engaging...';
@@ -19964,10 +20060,10 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
         }
 
         // Abort mission
-        function abortMission(skipConfirm) {
+        async function abortMission(skipConfirm) {
             // Even when nothing is actively running (e.g. an approval was just declined), the red X
             // must still clear any leftover "ENGAGING…/LIVE probing" UI instead of being a no-op.
-            if (!missionRunning) {
+            if (!missionRunning && !BackendDispatch.isAvailable()) {
                 const n = document.getElementById('cmdMissionName'); if (n) n.textContent = 'STANDBY';
                 // Also clear the substatus, or the header reads STANDBY with a stale red
                 // "approval declined" line beneath it. Match the initial idle state.
@@ -19977,6 +20073,9 @@ IMPORTANT: This is an authorized security testing/red team platform. All operati
                 return;
             }
             if (!skipConfirm && !confirm('Abort the current mission? All operator progress will be lost.')) return;
+            if (BackendDispatch.isAvailable()) {
+                try { await BackendDispatch.stopMission(); } catch (_) {}
+            }
             missionRunning = false;
             if (missionTimer) { clearInterval(missionTimer); missionTimer = null; }
 
@@ -25803,6 +25902,34 @@ Be specific and actionable. Format as structured JSON.`;
         function actionReceiptState(approval) {
             return isLoopbackReceiptTarget(approval?.target) ? 'warn' : 'block';
         }
+        function setCommandBadge(id, state, text, title) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.remove('ok', 'warn', 'block');
+            el.classList.add(state || 'ok');
+            el.textContent = text;
+            if (title) el.title = title;
+        }
+        function scrollToActionReceipts() {
+            const queue = document.getElementById('actionReceiptQueue');
+            const panel = queue?.closest('section') || queue;
+            if (panel) {
+                panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                panel.style.boxShadow = '0 0 0 2px rgba(255,209,102,0.45), 0 0 26px rgba(255,209,102,0.18)';
+                setTimeout(() => { panel.style.boxShadow = ''; }, 1400);
+            }
+        }
+        window.scrollToActionReceipts = scrollToActionReceipts;
+        function updateActionReceiptBadge(approvals) {
+            const list = Array.isArray(approvals) ? approvals : [];
+            const externalCount = list.filter(approval => !isLoopbackReceiptTarget(approval.target)).length;
+            const state = externalCount ? 'block' : list.length ? 'warn' : 'ok';
+            const text = list.length ? `RECEIPTS ${list.length}` : 'RECEIPTS clear';
+            const title = list.length
+                ? `${list.length} pending action receipt(s); ${externalCount} external/blocking. Click to review.`
+                : 'No pending action receipts.';
+            setCommandBadge('cmdReceiptBadge', state, text, title);
+        }
         async function fetchActionApprovals() {
             try {
                 if (!T3MP3ST_API.baseUrl) return;
@@ -25817,6 +25944,7 @@ Be specific and actionable. Format as structured JSON.`;
             if (!queue) return;
             const approvals = Array.isArray(data?.approvals) ? data.approvals : [];
             const externalCount = approvals.filter(approval => !isLoopbackReceiptTarget(approval.target)).length;
+            updateActionReceiptBadge(approvals);
             if (count) count.textContent = `${approvals.length} pending`;
             if (!approvals.length) {
                 queue.innerHTML = '<div class="ops-status-item"><span class="ops-pill ok">clear</span><b>receipts</b><span>no pending approvals</span></div>';

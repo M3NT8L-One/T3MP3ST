@@ -185,6 +185,32 @@ const HOST = process.env.T3MP3ST_HOST || (process.env.DOCKER === 'true' ? '0.0.0
 const HOST_IS_LOOPBACK = /^(127\.|localhost$|::1$|\[::1\]$)/i.test(HOST.trim());
 
 const app = express();
+app.disable('x-powered-by');
+
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  // The War Room is currently a static, inline-heavy single-file UI. Keep inline
+  // script/style working, but still deny framing/object loads and keep network
+  // connections pinned to this local app / loopback endpoints.
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+    ].join('; '),
+  );
+  next();
+});
 
 // --- Localhost origin allow-list ------------------------------------------
 // A request from the same-origin UI, curl, or the CLI is trusted; a request
@@ -6479,7 +6505,9 @@ function handleMissionReport(req: Request, res: Response): void {
     res.status(404).json({ error: 'No active mission' });
     return;
   }
-  const missionId = typeof req.params.id === 'string' && req.params.id ? req.params.id : undefined;
+  const missionId = typeof req.params.id === 'string' && req.params.id
+    ? req.params.id
+    : cmd.mission.getActiveMission()?.id || latestMissionId(cmd);
   try {
     const report = cmd.generateReport(missionId);
     res.json({ success: true, missionId: missionId || null, report });
@@ -6491,6 +6519,96 @@ function handleMissionReport(req: Request, res: Response): void {
 app.get('/api/mission/report', (req: Request, res: Response) => handleMissionReport(req, res));
 app.get('/api/mission/:id/report', (req: Request, res: Response) => handleMissionReport(req, res));
 
+function latestMissionId(cmd: TempestCommand): string | undefined {
+  return cmd.mission.getAllMissions()
+    .sort((a, b) => (b.completedAt || b.startedAt || 0) - (a.completedAt || a.startedAt || 0))[0]?.id;
+}
+
+function missionLifecycle(status: ReturnType<TempestCommand['getStatus']>, mission: any): Record<string, unknown> {
+  const now = Date.now();
+  const missionStatus = mission?.status || 'none';
+  const lastTickAgeMs = status.lastTickAt ? now - status.lastTickAt : null;
+  const operators = status.operators || {};
+  const allIdle = Number(operators.busy || 0) === 0;
+  const staleTick = Boolean(status.running && !status.paused && lastTickAgeMs != null && lastTickAgeMs > 120000 && allIdle);
+
+  if (!mission) {
+    return {
+      state: status.running ? 'orphaned_loop' : 'idle',
+      severity: status.running ? 'block' : 'ok',
+      dispatchActive: status.running && !status.paused,
+      missionStatus,
+      lastTickAgeMs,
+      recommendation: status.running
+        ? 'Stop the command loop before launching a fresh mission.'
+        : 'Ready for a fresh mission.',
+    };
+  }
+
+  if (!status.running && missionStatus === 'active') {
+    return {
+      state: 'zombie',
+      severity: 'block',
+      dispatchActive: false,
+      missionStatus,
+      phase: mission.currentPhase,
+      progress: mission.progress,
+      lastTickAgeMs,
+      recommendation: 'Stop the mission to clear the stale active record, then re-engage. Resume only works for paused missions.',
+    };
+  }
+
+  if (staleTick) {
+    return {
+      state: 'stalled',
+      severity: 'block',
+      dispatchActive: false,
+      missionStatus,
+      phase: mission.currentPhase,
+      progress: mission.progress,
+      lastTickAgeMs,
+      recommendation: 'Tick loop appears stale while operators are idle. Stop and re-engage unless a long-running approved task is visible.',
+    };
+  }
+
+  if (status.paused || missionStatus === 'paused') {
+    return {
+      state: 'paused',
+      severity: 'warn',
+      dispatchActive: false,
+      missionStatus,
+      phase: mission.currentPhase,
+      progress: mission.progress,
+      lastTickAgeMs,
+      recommendation: 'Resume the paused mission or stop it before launching a fresh run.',
+    };
+  }
+
+  if (status.running && missionStatus === 'active') {
+    return {
+      state: 'running',
+      severity: 'ok',
+      dispatchActive: true,
+      missionStatus,
+      phase: mission.currentPhase,
+      progress: mission.progress,
+      lastTickAgeMs,
+      recommendation: 'Mission dispatch loop is running.',
+    };
+  }
+
+  return {
+    state: missionStatus,
+    severity: missionStatus === 'completed' || missionStatus === 'aborted' ? 'ok' : 'warn',
+    dispatchActive: false,
+    missionStatus,
+    phase: mission.currentPhase,
+    progress: mission.progress,
+    lastTickAgeMs,
+    recommendation: 'Mission is not dispatching.',
+  };
+}
+
 /**
  * POST /api/mission/stop — Stop the active mission
  */
@@ -6501,7 +6619,7 @@ app.post('/api/mission/stop', (_req: Request, res: Response) => {
     return;
   }
 
-  cmd.stop();
+  cmd.stop('operator requested stop through War Room API');
   // Stop the General's sitrep interval too — otherwise startMonitoring's setInterval
   // leaks and keeps firing against a dead mission.
   if (activeGeneral) activeGeneral.stopMonitoring();
@@ -6516,6 +6634,11 @@ app.post('/api/mission/pause', (_req: Request, res: Response) => {
   const cmd = getTempestCommand();
   if (!cmd) {
     res.status(404).json({ error: 'No active mission' });
+    return;
+  }
+
+  if (!cmd.getStatus().running) {
+    res.status(409).json({ error: 'Mission is not running; start a mission before pausing' });
     return;
   }
 
@@ -6534,6 +6657,15 @@ app.post('/api/mission/resume', (_req: Request, res: Response) => {
     return;
   }
 
+  const status = cmd.getStatus();
+  if (!status.running || !status.paused) {
+    res.status(409).json({
+      error: 'Mission is not paused; resume cannot restart a stopped or completed dispatch loop',
+      next: 'Use POST /api/mission/stop to clear a stale run, then POST /api/mission/start to re-engage.',
+    });
+    return;
+  }
+
   cmd.resume();
   broadcastEvent('mission:resumed', { timestamp: Date.now() });
   res.json({ success: true, message: 'Mission resumed' });
@@ -6545,7 +6677,22 @@ app.post('/api/mission/resume', (_req: Request, res: Response) => {
 app.get('/api/mission/status', (_req: Request, res: Response) => {
   const cmd = getTempestCommand();
   if (!cmd) {
-    res.json({ active: false, progress: [], tasks: [] });
+    res.json({
+      active: false,
+      paused: false,
+      tickCount: 0,
+      lastTickAt: null,
+      stoppedAt: null,
+      lifecycle: {
+        state: 'idle',
+        severity: 'ok',
+        dispatchActive: false,
+        missionStatus: 'none',
+        lastTickAgeMs: null,
+        recommendation: 'Ready for a fresh mission.',
+      },
+      mission: null,
+    });
     return;
   }
 
@@ -6553,6 +6700,7 @@ app.get('/api/mission/status', (_req: Request, res: Response) => {
   const mission = cmd.mission.getActiveMission();
   const findings = cmd.vault.getAllFindings();
   const allOperators = cmd.cell.getAllOperators().map(op => op.getSummary());
+  const lifecycle = missionLifecycle(status, mission);
 
   res.json({
     active: status.running,
@@ -6560,6 +6708,9 @@ app.get('/api/mission/status', (_req: Request, res: Response) => {
     stallReason: status.stallReason,
     name: status.name,
     tickCount: status.tickCount,
+    lastTickAt: status.lastTickAt,
+    stoppedAt: status.stoppedAt,
+    lifecycle,
     mission: mission ? {
       id: mission.id,
       name: mission.name,

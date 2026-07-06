@@ -9,6 +9,10 @@ const baseUrl = (process.env.T3MP3ST_API_URL || 'http://127.0.0.1:3333').replace
 const jsonMode = process.argv.includes('--json');
 const strictMode = process.argv.includes('--strict');
 const checks = [];
+const DEFAULT_API_TIMEOUT_MS = 2500;
+// Tool/agent inspection endpoints spawn bounded child probes (up to 8s for an
+// agent version); leave room for response overhead without weakening fast checks.
+const INSPECTION_API_TIMEOUT_MS = 12_000;
 
 function check(name, passed, detail = '', severity = 'block') {
   checks.push({ name, passed: Boolean(passed), detail, severity });
@@ -32,9 +36,9 @@ async function commandPath(binary) {
   }
 }
 
-async function apiGet(path) {
+async function apiGet(path, timeoutMs = DEFAULT_API_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2500);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${baseUrl}${path}`, { signal: controller.signal });
     const text = await response.text();
@@ -108,12 +112,14 @@ function isLoopbackTarget(target) {
 }
 
 function missionSummary(status) {
-  if (!status?.active) return 'idle';
+  if (!status?.mission && !status?.active) return status?.lifecycle?.state || 'idle';
+  const lifecycle = status.lifecycle || {};
   const mission = status.mission || {};
   const phase = mission.currentPhase || 'unknown-phase';
   const progress = typeof mission.progress === 'number' ? `${Math.round(mission.progress)}%` : 'n/a';
   const operators = status.operators?.summary || {};
-  return `active ${phase} ${progress}, ${Number(operators.busy || 0)}/${Number(operators.total || 0)} busy`;
+  const state = lifecycle.state || (status.active ? 'running' : mission.status || 'idle');
+  return `${state} ${phase} ${progress}, tick ${status.tickCount ?? 'n/a'}, ${Number(operators.busy || 0)}/${Number(operators.total || 0)} busy`;
 }
 
 async function main() {
@@ -228,14 +234,14 @@ async function main() {
   }
 
   if (apiReachable) {
-    const preflight = await apiGet('/api/preflight');
+    const preflight = await apiGet('/api/preflight', INSPECTION_API_TIMEOUT_MS);
     check('Capability preflight', preflight.ok && typeof preflight.data.score === 'number', `${preflight.data.score ?? 'n/a'}/100`);
-    const arsenal = await apiGet('/api/arsenal/status');
+    const arsenal = await apiGet('/api/arsenal/status', INSPECTION_API_TIMEOUT_MS);
     check('Arsenal status', arsenal.ok && arsenal.data.schema_version === 't3mp3st_arsenal_status/v1', `${arsenal.data.summary?.installedCommandReady ?? 0}/${arsenal.data.summary?.commandReady ?? 0} installed`);
     check('Arsenal does not fake empty coverage', arsenal.ok && arsenal.data.summary?.unmodeled === false, `unmodeled=${arsenal.data.summary?.unmodeled}`);
     const activation = await apiGet('/api/arsenal/activation');
     check('Arsenal activation plan', activation.ok && activation.data.schema_version === 't3mp3st_arsenal_activation/v1', `${activation.data.summary?.total || 0} wired / doc ${activation.data.localPlanDoc || 'missing'}`);
-    const localAgents = await apiGet('/api/agents/local/detect');
+    const localAgents = await apiGet('/api/agents/local/detect', INSPECTION_API_TIMEOUT_MS);
     const hermesAgent = Array.isArray(localAgents.data.agents)
       ? localAgents.data.agents.find(agent => agent.id === 'hermes')
       : null;
@@ -245,7 +251,15 @@ async function main() {
 
     const missionStatus = await apiGet('/api/mission/status');
     check('Mission status endpoint', missionStatus.ok, `${missionStatus.status} ${missionSummary(missionStatus.data)}`);
-    const activeMission = Boolean(missionStatus.data?.active);
+    const lifecycleState = String(missionStatus.data?.lifecycle?.state || '');
+    const lifecycleBlocked = ['zombie', 'stalled', 'orphaned_loop'].includes(lifecycleState);
+    check(
+      'Mission lifecycle is coherent',
+      !lifecycleBlocked,
+      missionStatus.data?.lifecycle?.recommendation || missionSummary(missionStatus.data),
+      'block',
+    );
+    const activeMission = Boolean(missionStatus.data?.active || missionStatus.data?.mission?.status === 'active' || lifecycleState === 'paused');
     check('No active mission parked', !activeMission, missionSummary(missionStatus.data), 'warn');
     const targets = Array.isArray(missionStatus.data?.targets) ? missionStatus.data.targets : [];
     const externalTargets = targets.filter(target => !isLoopbackTarget(target?.address || target?.url || target));

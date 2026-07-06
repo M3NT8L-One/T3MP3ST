@@ -104,3 +104,10 @@ npm run ops:preflight
 ```
 
 The preflight checks the LaunchAgent, listener on `127.0.0.1:3333`, War Room health, Hermes connection, active mission state, and pending `/api/approvals`. A clean run should start with no parked mission and no stale pending approvals. Use `npm run ops:status` for the same report without strict launch blockers. The War Room's Action Receipts strip mirrors the same pending queue with approve/reject controls.
+
+Run-3 polish tightened the live-run wrap state:
+
+- The command header now has a **Receipt** badge that jumps to Action Receipts.
+- `/api/mission/status` exposes `lifecycle.state` (`idle`, `running`, `paused`, `stalled`, `zombie`, `orphaned_loop`) and both preflight and doctor treat incoherent lifecycle states as blockers.
+- `POST /api/mission/resume` only resumes a paused mission. If the dispatch loop is stopped while a mission still looks active, use `POST /api/mission/stop`, then re-engage.
+- `POST /api/mission/stop` clears the active mission record so a stopped run does not remain parked as `mission.status=active`.

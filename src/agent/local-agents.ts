@@ -468,7 +468,7 @@ export function localAgentChat(id: string, prompt: string, opts: { model?: strin
   } else if (id === 'codex') {
     workDir = mkdtempSync(join(tmpdir(), 't3mp3st-codexllm-'));
     outFile = join(workDir, 'reply.txt');
-    args = ['exec', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'read-only', '--output-last-message', outFile, ...(model ? ['-m', model] : [])];
+    args = ['exec', '--ephemeral', '--skip-git-repo-check', '--color', 'never', '--sandbox', 'read-only', '--output-last-message', outFile, ...(model ? ['-m', model] : [])];
   } else { // hermes — takes the prompt as an arg and keeps Hermes' manual approval gate intact.
     args = [...hermesProfileArgs(), '-z', prompt, ...(model ? ['-m', model] : [])];
     viaStdin = false;

@@ -46,6 +46,46 @@ describe('local API authorization hardening invariants', () => {
     expect(uiSource).not.toMatch(/let provider = ['"]openrouter['"];\s*\n\s*let model = state\.settings\.selectedModel/);
   });
 
+  it('server disables Express fingerprinting and sets baseline local-app security headers', () => {
+    const hardening = sourceBlock("const app = express();", '// --- Localhost origin allow-list');
+
+    expect(hardening).toMatch(/app\.disable\(['"]x-powered-by['"]\)/);
+    expect(hardening).toContain('X-Content-Type-Options');
+    expect(hardening).toContain('X-Frame-Options');
+    expect(hardening).toContain('Referrer-Policy');
+    expect(hardening).toContain('Permissions-Policy');
+    expect(hardening).toContain('Content-Security-Policy');
+    expect(hardening).toContain('frame-ancestors');
+  });
+
+  it('server mission/general routes default to the configured LLM instead of hardcoded OpenRouter', () => {
+    const resolver = routeBlock('function resolveGeneralLLMConfig(', '/**\n * Bring a planned mission UP for real');
+    const missionRoute = routeBlock("app.post('/api/mission/start'", "app.get('/api/mission/report'");
+    const generalRoutes = routeBlock("app.post('/api/general/plan'", '// =============================================================================\n// THE ADMIRAL');
+
+    expect(resolver).toContain('config.getLLMConfig()');
+    expect(resolver).toContain('provider || defaultConfig.provider');
+    expect(missionRoute).toContain('resolveGeneralLLMConfig(provider, model, apiKey)');
+    expect(`${missionRoute}\n${generalRoutes}`).not.toMatch(/provider\s*=\s*['"]openrouter['"]/);
+    expect(`${missionRoute}\n${generalRoutes}`).not.toMatch(/model\s*=\s*['"]anthropic\/claude-sonnet-4['"]/);
+  });
+
+  it('health and LLM status count keyless local backends as configured', () => {
+    const health = routeBlock('function healthPayload()', '// =============================================================================\n// API ENDPOINTS - HEALTH & STATUS');
+    const llmStatus = routeBlock("app.get('/api/llm/status'", '// =============================================================================\n// TOOL EXECUTION ENDPOINTS');
+
+    expect(health).toContain('providerRunsKeyless(llmConfig.provider)');
+    expect(llmStatus).toContain('providerRunsKeyless(llmConfig.provider)');
+  });
+
+  it('War Room no-key/no-agent backend dispatch defers to the server-configured LLM', () => {
+    expect(uiSource).toContain("serverLLM: null");
+    expect(uiSource).toContain('this.serverLLM = data.llm');
+    expect(uiSource).toContain('No browser API key — using the server-configured LLM backend');
+    expect(uiSource).toContain('LLM backend: server default — no browser API key sent');
+    expect(uiSource).not.toMatch(/let provider = ['"]openrouter['"];\s*\n\s*let model = state\.settings\.selectedModel/);
+  });
+
   it('/api/events does not grant wildcard CORS and rejects foreign browser origins before opening SSE', () => {
     const route = routeBlock("app.get('/api/events'", '// =============================================================================\n// API ENDPOINTS - HEALTH & STATUS');
 
@@ -86,6 +126,22 @@ describe('local API authorization hardening invariants', () => {
     expect(parser).toMatch(/countCurlUrlOperands\(args\)\s*>\s*1/);
     expect(parser).toMatch(/multiple URL operands/);
     expect(parser).toMatch(/changes the effective network destination/);
+  });
+
+  it('approval mutations sit behind the global localhost Origin/Referer guard', () => {
+    const guard = sourceBlock('const STATE_CHANGING_METHODS', 'app.use(express.json');
+    const guardIndex = serverSource.indexOf('const STATE_CHANGING_METHODS');
+    const approveIndex = serverSource.indexOf("app.post('/api/approvals/:id/approve'");
+    const rejectIndex = serverSource.indexOf("app.post('/api/approvals/:id/reject'");
+
+    expect(guard).toMatch(/new Set\(\[['"]POST['"], ['"]PUT['"], ['"]PATCH['"], ['"]DELETE['"]\]\)/);
+    expect(guard).toMatch(/req\.get\(['"]origin['"]\)/);
+    expect(guard).toMatch(/req\.get\(['"]referer['"]\)/);
+    expect(guard).toMatch(/isLoopbackOrigin\(source\)/);
+    expect(guard).toMatch(/status\(403\)\.json/);
+    expect(guardIndex).toBeGreaterThanOrEqual(0);
+    expect(approveIndex).toBeGreaterThan(guardIndex);
+    expect(rejectIndex).toBeGreaterThan(guardIndex);
   });
 
   it('Admiral live launch permits expanded targets only with explicit operator approval receipts', () => {

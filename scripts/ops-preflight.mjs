@@ -155,7 +155,19 @@ export async function main() {
   check('Mission status available', missionShapeValid,
     missionShapeValid ? 'verified' : mission.ok ? 'invalid response shape' : apiFailure(mission), 'block');
   if (missionShapeValid) {
-    const missionActive = mission.data.active === true;
+    const lifecycleState = String(mission.data.lifecycle?.state || '');
+    const lifecycleBlocked = ['zombie', 'stalled', 'orphaned_loop'].includes(lifecycleState);
+    check(
+      'Mission lifecycle is coherent',
+      !lifecycleBlocked,
+      lifecycleBlocked
+        ? mission.data.lifecycle?.recommendation || `lifecycle ${lifecycleState}`
+        : lifecycleState || 'not reported',
+      'block',
+    );
+    const missionActive = mission.data.active === true
+      || mission.data.mission?.status === 'active'
+      || lifecycleState === 'paused';
     const activeMission = mission.data.mission || {};
     const activeDetail = [
       `mission ${activeMission.id || mission.data.name || 'unknown'}`,

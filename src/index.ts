@@ -329,6 +329,8 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
   private paused: boolean = false;
   private tickInterval: NodeJS.Timeout | null = null;
   private tickCount: number = 0;
+  private lastTickAt: number | null = null;
+  private stoppedAt: number | null = null;
   private hooks: RuntimeHooks;
   private readonly taskTimeoutMs: number;
 
@@ -802,6 +804,8 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
 
     this.running = true;
     this.paused = false;
+    this.lastTickAt = Date.now();
+    this.stoppedAt = null;
     this.emit('command:started');
 
     // Start tick loop (1 second interval). Catch any tick error so a single bad tick
@@ -831,15 +835,27 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
   /**
    * Stop command operations
    */
-  public stop(): void {
-    if (!this.running) return;
+  public stop(reason = 'operator stopped mission'): void {
+    const mission = this.mission.getActiveMission();
+    if (!this.running && !this.paused && !this.tickInterval && !mission) return;
 
     this.running = false;
+    this.paused = false;
     this.taskSeeded = false;
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
+    this.stoppedAt = Date.now();
+
+    if (mission && (mission.status === 'active' || mission.status === 'paused' || mission.status === 'planning')) {
+      try {
+        this.mission.abortMission(mission.id, reason);
+      } catch {
+        // Mission may already have moved to a terminal state via another path.
+      }
+    }
+
     this.emit('command:stopped');
   }
 
@@ -848,6 +864,10 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
    */
   public pause(): void {
     if (!this.running || this.paused) return;
+    const mission = this.mission.getActiveMission();
+    if (mission?.status === 'active') {
+      this.mission.pauseMission(mission.id);
+    }
     this.paused = true;
     this.emit('command:paused');
   }
@@ -857,6 +877,10 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
    */
   public resume(): void {
     if (!this.running || !this.paused) return;
+    const mission = this.mission.getActiveMission();
+    if (mission?.status === 'paused') {
+      this.mission.resumeMission(mission.id);
+    }
     this.paused = false;
     this.stallReason = null;
     this.emit('command:resumed');
@@ -922,6 +946,7 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
     if (this.paused) return;
 
     this.tickCount++;
+    this.lastTickAt = Date.now();
     this.emit('tick', this.tickCount);
 
     // Check OPSEC status
@@ -1299,6 +1324,8 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
     running: boolean;
     paused: boolean;
     tickCount: number;
+    lastTickAt: number | null;
+    stoppedAt: number | null;
     operators: ReturnType<OperatorCell['getStatus']>;
     targets: ReturnType<TargetEnvironment['getStats']>;
     vault: ReturnType<EvidenceVault['getStats']>;
@@ -1324,6 +1351,8 @@ export class TempestCommand extends EventEmitter<CommandEvents> {
       running: this.running,
       paused: this.paused,
       tickCount: this.tickCount,
+      lastTickAt: this.lastTickAt,
+      stoppedAt: this.stoppedAt,
       operators: this.cell.getStatus(),
       targets: this.targetEnv.getStats(),
       vault: this.vault.getStats(),

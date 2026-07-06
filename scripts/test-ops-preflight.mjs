@@ -159,6 +159,28 @@ await test('blocks an active mission and reports current nested mission fields',
   });
 });
 
+await test('blocks zombie lifecycle state even when the server active flag is false', async () => {
+  const routes = healthyRoutes({
+    '/api/mission/status': {
+      active: false,
+      mission: { id: 'mission-zombie', status: 'active', currentPhase: 'recon' },
+      lifecycle: {
+        state: 'zombie',
+        recommendation: 'Stop the stale mission before re-engaging.',
+      },
+    },
+  });
+  await withServer(routes, async url => {
+    const { code, result } = await runPreflight(url);
+    assert.equal(code, 1);
+    const lifecycle = findCheck(result, 'Mission lifecycle is coherent');
+    assert.equal(lifecycle.passed, false);
+    assert.equal(lifecycle.severity, 'block');
+    assert.match(lifecycle.detail, /Stop the stale mission/);
+    assert.equal(findCheck(result, 'No active mission in progress').passed, false);
+  });
+});
+
 await test('warns for pending approvals and strict mode fails the warning', async () => {
   const routes = healthyRoutes({
     '/api/approvals?status=pending': { approvals: [{ id: 'approval-1' }] },
